@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DataSourcePerFileMappings">
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query.sql" value="703497f6-5eca-4a6a-ab5b-f0d8884402a4" />
+    <file url="file://$PROJECT_DIR$/Insertion_queries.sql" value="703497f6-5eca-4a6a-ab5b-f0d8884402a4" />
+    <file url="file://$PROJECT_DIR$/healthcare_analysis.sql" value="703497f6-5eca-4a6a-ab5b-f0d8884402a4" />
+    <file url="file://$PROJECT_DIR$/part_2_performance_measure.sql" value="703497f6-5eca-4a6a-ab5b-f0d8884402a4" />
+  </component>
+</project>

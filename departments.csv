@@ -1,0 +1,21 @@
+department_id,department_name,floor,capacity
+1,Cardiology Unit,3,20
+2,Internal Medicine,2,30
+3,Emergency,1,45
+4,Neurology,4,25
+5,Pediatrics Ward,2,30
+6,Oncology,5,20
+7,Orthopedics,3,25
+8,Dermatology,2,15
+9,Psychiatry,3,20
+10,Radiology,1,30
+11,Gastroenterology,4,20
+12,Pulmonology,4,20
+13,Endocrinology,3,15
+14,Nephrology,4,15
+15,Ophthalmology,2,15
+16,Rheumatology,3,15
+17,Urology,4,20
+18,ENT,2,15
+19,Anesthesiology,1,10
+20,Pathology,1,10

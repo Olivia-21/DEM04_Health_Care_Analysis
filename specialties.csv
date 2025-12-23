@@ -1,0 +1,21 @@
+specialty_id,specialty_name,specialty_code
+1,Cardiology,CARD
+2,Internal Medicine,IM
+3,Emergency,ER
+4,Neurology,NEUR
+5,Pediatrics,PED
+6,Oncology,ONC
+7,Orthopedics,ORTH
+8,Dermatology,DERM
+9,Psychiatry,PSY
+10,Radiology,RAD
+11,Gastroenterology,GAST
+12,Pulmonology,PULM
+13,Endocrinology,ENDO
+14,Nephrology,NEPH
+15,Ophthalmology,OPH
+16,Rheumatology,RHEU
+17,Urology,URO
+18,ENT,ENT
+19,Anesthesiology,ANES
+20,Pathology,PATH
