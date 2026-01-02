@@ -1,8 +1,3 @@
-# CREATE DATABASE healthcare_db;
-# USE healthcare_db;
-# drop database healthcare_db;
-# show databases;
--- DDL Queries for all 8 tables
 -- Patient Table
 CREATE TABLE patients (
   patient_id INT PRIMARY KEY AUTO_INCREMENT,

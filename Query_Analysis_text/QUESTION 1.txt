@@ -1,0 +1,32 @@
+QUESTION 1
+SQL QUERY:
+
+EXPLAIN ANALYZE
+SELECT
+    DATE_FORMAT(e.encounter_date, '%Y-%m') AS encounter_month,
+    s.specialty_name,
+    e.encounter_type,
+    COUNT(*) AS total_encounters,
+    COUNT(DISTINCT e.patient_id) AS unique_patients
+FROM encounters e
+JOIN providers p ON e.provider_id = p.provider_id
+JOIN specialties s ON p.specialty_id = s.specialty_id
+GROUP BY
+    DATE_FORMAT(e.encounter_date, '%Y-%m'),
+    s.specialty_name,
+    e.encounter_type
+ORDER BY encounter_month, specialty_name;
+
+
+SCHEMA ANALYSIS:
+Tables joined: encounters, providers and specialties.
+Number of joins: 2
+Performance:
+Execution time: 47ms
+Estimated rows scanned: 9996 rows
+Bottleneck Identified: Expensive GROUP BY with sorting and COUNT (DISTINCT) after processing a large intermediate result set. 
+Why is this slow?
+Ans: The query is slow because MySQL must process and sort nearly 10,000 intermediate rows created by joins before performing a GROUP BY aggregation that includes a COUNT (DISTINCT patient_id), which requires additional deduplication. 
+
+What's the root cause?
+Ans: The root cause is the normalized OLTP schema, which requires multiple joins to retrieve specialty information and perform aggregation at query runtime. 
