@@ -1,0 +1,93 @@
+Decision 1: Fact Table Grain 
+
+Option A - One row per encounter
+
+Justification:
+
+This grain best supports all four business questions: 
+Monthly encounters by specialty 
+Encounter is the natural atomic event. 
+2. Top diagnosis-procedure pairs
+Use bridge tables to associate diagnoses and procedures to encounters. 
+3. 30-day readmission pairs
+Readmissions are defined at the encounter level
+4. Revenue by specialty and month
+Billing is tied to encounters
+
+Choosing a finer grain (diagnosis-level or procedure-level) would unnecessarily multiply rows, increase storage and complicate aggregation without improving performance for these queries. 
+
+
+Decision 2: Dimension Tables
+
+dim_date
+date_key (PK, surrogate)
+calendar_date
+year
+month
+month_name
+quarter
+day_of_month
+day_of_week
+
+dim_patient
+patient_key (PK)
+patient_id (business key)
+first_name
+last_name
+gender
+date_of_birth
+age 
+age_group
+
+dim_provider
+provider_key (PK)
+provider_id
+provider_name
+credential
+specialty_key
+department_key
+
+dim_specialty
+specialty_key (PK)
+specialty_id
+specialty_name
+specialty_code
+
+dim_department
+encounter_type_key (PK)
+encounter_type_name (Outpatient, Inpatient, ER)
+
+Additional Dimensions
+Diagnoses and procedures are modeled using bridge tables, not dimensions directly joined to the fact. 
+
+ 
+Decision 3: Pre-Aggregated Metrics
+
+Metrics stored in fact_encounters
+diagnosis_count
+procedure_count
+total_claim_amount
+total_allowed_amount
+length_of_stay_days
+
+Why Pre-Aggregation Helps Performance
+Avoids expensive joins to diagnoses, procedure, and billing tables
+Reduces row scanning and aggregation cost
+Enables fast GROUP BY queries on fact table only
+Shifts computation from query time to ETL time
+
+Decision 4: Bridge Tables
+Decision : 
+Yes, I will use bridge tables
+
+Justification: 
+Diagnoses and procedures are many-to-many
+Storing them directly in the fact table would cause row explosion
+Bridge tables preserve flexibility for detailed analysis without bloating the fact table
+
+
+
+
+
+
+

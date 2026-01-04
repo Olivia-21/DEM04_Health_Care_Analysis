@@ -1,0 +1,33 @@
+QUESTION 3
+SQL QUERY:
+
+EXPLAIN ANALYZE
+SELECT
+    s.specialty_name,
+    COUNT(DISTINCT e1.encounter_id) AS readmissions
+FROM encounters e1
+JOIN encounters e2
+    ON e1.patient_id = e2.patient_id
+   AND e2.encounter_date > e1.discharge_date
+   AND e2.encounter_date <= DATE_ADD(e1.discharge_date, INTERVAL 30 DAY)
+JOIN providers p ON e2.provider_id = p.provider_id
+JOIN specialties s ON p.specialty_id = s.specialty_id
+WHERE e1.encounter_type = 'Inpatient'
+GROUP BY s.specialty_name
+ORDER BY readmissions DESC;
+
+
+SCHEMA ANALYSIS:
+Tables joined: encounters(twice, self join), providers and specialties.
+Number of joins: 3
+Performance:
+Execution time: 55.3ms
+Estimated rows scanned: 20 rows
+Bottleneck Identified:
+
+Why is this slow?
+Ans: The query uses a self-join on the encounters table to detect readmissions, This requires comparing each inpatient encounter with subsequent encounters for the same patient within a date range, with increases processing complexity. 
+
+What's the root cause?
+Ans: The root cause is the need to perform a self-join on a transactional table to derive readmission logic. The database must repeatedly scan and compare encounter records per patient. 
+
