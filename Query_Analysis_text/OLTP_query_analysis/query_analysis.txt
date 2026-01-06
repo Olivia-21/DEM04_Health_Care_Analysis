@@ -1,0 +1,149 @@
+QUESTION 1
+SQL QUERY:
+
+EXPLAIN ANALYZE
+SELECT
+    DATE_FORMAT(e.encounter_date, '%Y-%m') AS encounter_month,
+    s.specialty_name,
+    e.encounter_type,
+    COUNT(*) AS total_encounters,
+    COUNT(DISTINCT e.patient_id) AS unique_patients
+FROM encounters e
+JOIN providers p ON e.provider_id = p.provider_id
+JOIN specialties s ON p.specialty_id = s.specialty_id
+GROUP BY
+    DATE_FORMAT(e.encounter_date, '%Y-%m'),
+    s.specialty_name,
+    e.encounter_type
+ORDER BY encounter_month, specialty_name;
+
+
+SCHEMA ANALYSIS:
+Tables joined: encounters, providers and specialties.
+Number of joins: 2
+Performance:
+Execution time: 47ms
+Estimated rows scanned: 9996 rows
+Bottleneck Identified: Expensive GROUP BY with sorting and COUNT (DISTINCT) after processing a large intermediate result set. 
+Why is this slow?
+Ans: The query is slow because MySQL must process and sort nearly 10,000 intermediate rows created by joins before performing a GROUP BY aggregation that includes a COUNT (DISTINCT patient_id), which requires additional deduplication. 
+
+What's the root cause?
+Ans: The root cause is the normalized OLTP schema, which requires multiple joins to retrieve specialty information and perform aggregation at query runtime. 
+
+
+QUESTION 2
+SQL QUERY:
+
+EXPLAIN ANALYZE
+SELECT
+    d.icd10_code,
+    pr.cpt_code,
+    COUNT(*) AS encounter_count
+FROM encounter_diagnoses ed
+JOIN diagnoses d ON ed.diagnosis_id = d.diagnosis_id
+JOIN encounter_procedures ep ON ed.encounter_id = ep.encounter_id
+JOIN procedures pr ON ep.procedure_id = pr.procedure_id
+GROUP BY d.icd10_code, pr.cpt_code
+ORDER BY encounter_count DESC;
+
+
+SCHEMA ANALYSIS:
+Tables joined: encounter_diagnoses, diagnoses, encounter_procedures and procedures
+Number of joins: 3
+Performance:
+Execution time: 229ms
+Estimated rows scanned:36674
+Bottleneck Identified:
+
+Why is this slow?
+Ans: The query is slow because MySQL must first create a temporary table to store grouped results and then perform a full scan and sort on that temporary table. 
+
+What's the root cause?
+Ans: The root cause is running analytics-style queries(GROUP BY, ORDER BY) on a normalized OLTP schema. OLTP tables are optimized for transaction which forces the database to create temporary tables and perform expensive scans and sorts. 
+
+
+
+QUESTION 3
+SQL QUERY:
+
+EXPLAIN ANALYZE
+SELECT
+    s.specialty_name,
+    COUNT(DISTINCT e1.encounter_id) AS readmissions
+FROM encounters e1
+JOIN encounters e2
+    ON e1.patient_id = e2.patient_id
+   AND e2.encounter_date > e1.discharge_date
+   AND e2.encounter_date <= DATE_ADD(e1.discharge_date, INTERVAL 30 DAY)
+JOIN providers p ON e2.provider_id = p.provider_id
+JOIN specialties s ON p.specialty_id = s.specialty_id
+WHERE e1.encounter_type = 'Inpatient'
+GROUP BY s.specialty_name
+ORDER BY readmissions DESC;
+
+
+SCHEMA ANALYSIS:
+Tables joined: encounters(twice, self join), providers and specialties.
+Number of joins: 3
+Performance:
+Execution time: 55.3ms
+Estimated rows scanned: 20 rows
+Bottleneck Identified:
+
+Why is this slow?
+Ans: The query uses a self-join on the encounters table to detect readmissions, This requires comparing each inpatient encounter with subsequent encounters for the same patient within a date range, with increases processing complexity. 
+
+What's the root cause?
+Ans: The root cause is the need to perform a self-join on a transactional table to derive readmission logic. The database must repeatedly scan and compare encounter records per patient. 
+
+
+
+QUESTION 4
+SQL QUERY:
+
+SELECT
+    DATE_FORMAT(b.claim_date, '%Y-%m') AS claim_month,
+    s.specialty_name,
+    SUM(b.allowed_amount) AS total_revenue
+FROM billing b
+JOIN encounters e ON b.encounter_id = e.encounter_id
+JOIN providers p ON e.provider_id = p.provider_id
+JOIN specialties s ON p.specialty_id = s.specialty_id
+GROUP BY
+    DATE_FORMAT(b.claim_date, '%Y-%m'),
+    s.specialty_name
+ORDER BY total_revenue DESC;
+
+SCHEMA ANALYSIS:
+Tables joined: billing, encounters, providers and specialties
+Number of joins: 3
+Performance:
+Execution time: 118ms
+Estimated rows scanned: 500 rows
+Bottleneck Identified:
+
+Why is this slow?
+Ans: Because there is a multiple table join before performing aggregation. After the joins, MySQL calculates total revenue and groups the data by month and specialty, which requires additional processing and sorting. 
+
+What's the root cause?
+Ans: There is a long join chain combined with aggregation on a normalized OLTP schema. Revenue data is stored separately from the descriptive attributes like specialty, so the database must join several tables and process more rows than necessary. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
