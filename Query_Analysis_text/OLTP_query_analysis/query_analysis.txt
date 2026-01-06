@@ -1,4 +1,4 @@
-QUESTION 1
+QUESTION 1- Monthly Encounters by Specialty
 SQL QUERY:
 
 EXPLAIN ANALYZE
@@ -22,7 +22,7 @@ SCHEMA ANALYSIS:
 Tables joined: encounters, providers and specialties.
 Number of joins: 2
 Performance:
-Execution time: 47ms
+Execution time: 51.5ms
 Estimated rows scanned: 9996 rows
 Bottleneck Identified: Expensive GROUP BY with sorting and COUNT (DISTINCT) after processing a large intermediate result set. 
 Why is this slow?
@@ -32,7 +32,13 @@ What's the root cause?
 Ans: The root cause is the normalized OLTP schema, which requires multiple joins to retrieve specialty information and perform aggregation at query runtime. 
 
 
-QUESTION 2
+
+
+
+
+
+
+QUESTION 2: Top Diagnosis-procedure pairs
 SQL QUERY:
 
 EXPLAIN ANALYZE
@@ -52,8 +58,8 @@ SCHEMA ANALYSIS:
 Tables joined: encounter_diagnoses, diagnoses, encounter_procedures and procedures
 Number of joins: 3
 Performance:
-Execution time: 229ms
-Estimated rows scanned:36674
+Execution time: 309ms
+Estimated rows scanned:39914 rows
 Bottleneck Identified:
 
 Why is this slow?
@@ -64,7 +70,11 @@ Ans: The root cause is running analytics-style queries(GROUP BY, ORDER BY) on a 
 
 
 
-QUESTION 3
+
+
+
+
+QUESTION 3: 30-Day Readmission Rate
 SQL QUERY:
 
 EXPLAIN ANALYZE
@@ -87,8 +97,8 @@ SCHEMA ANALYSIS:
 Tables joined: encounters(twice, self join), providers and specialties.
 Number of joins: 3
 Performance:
-Execution time: 55.3ms
-Estimated rows scanned: 20 rows
+Execution time: 51.1ms
+Estimated rows scanned: 133 rows
 Bottleneck Identified:
 
 Why is this slow?
@@ -99,7 +109,11 @@ Ans: The root cause is the need to perform a self-join on a transactional table 
 
 
 
-QUESTION 4
+
+
+
+
+QUESTION 4: Revenue by Specialty and Month
 SQL QUERY:
 
 SELECT
@@ -119,8 +133,8 @@ SCHEMA ANALYSIS:
 Tables joined: billing, encounters, providers and specialties
 Number of joins: 3
 Performance:
-Execution time: 118ms
-Estimated rows scanned: 500 rows
+Execution time: 85.5ms
+Estimated rows scanned: 9996 rows
 Bottleneck Identified:
 
 Why is this slow?

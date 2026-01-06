@@ -46,7 +46,7 @@ GROUP BY s.specialty_name
 ORDER BY readmissions DESC;
 
 
--- QUESTION 4: Revenue by Specialty & Month
+-- QUESTION 4: Revenue by Specialty and Month
 EXPLAIN ANALYZE
 SELECT
     DATE_FORMAT(b.claim_date, '%Y-%m') AS claim_month,

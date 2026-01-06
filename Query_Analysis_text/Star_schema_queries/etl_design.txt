@@ -1,0 +1,78 @@
+1. Dimension Load Logic
+ dim_patient
+Source: OLTP patients
+
+Extract
+Read patient demographic data from the patients table. 
+
+Transform
+Calculate patient age from date_of_birth
+Derive age_group (e.g 0-17, 18-35, 36-55, 55-70, 70+)
+
+Load
+Insert records into dim_patient
+Generate a surrogate key (patient_key)
+Retain patient_id as the business key for traceability back to OLTP 
+
+Change Handling 
+When patient demographic attributes change, overwrite the existing dimension record.  
+
+
+
+dim_date
+
+Extract
+Generate a continuous date range covering historical and future dates.
+
+Transform
+Derive date attributes such as year, month, quarter, day, month name and day of week
+
+Load
+Perform a one-time full load into dim_date
+Reuse this dimension for all fact table loads
+
+
+Update on Dimensions
+
+
+
+
+2. Fact Table Load Logic
+fact_encounters
+Grain: One row per encounter
+Source: Encounters, billing, encounter_diagnoses, encounter_procedures
+
+Lookup foreign keys from dimensions
+patient_key
+provider_key
+specialty_key
+department_key
+encounter_type_key
+date_key 
+
+Calculate pre-aggregated metrics:
+diagnosis_count - count of diagnoses per encounter
+procedure_count - count of procedures per encounter
+total-allowed_amount - sum of allowed amount from billing
+
+Missing Data Handling 
+Use default 'Unknown' dimension rows when lookups fail
+
+
+3. Bridge Table Logic 
+bridge_encounter_diagnoses
+For each record: 
+Lookup encounter_key from fact_encounters
+Lookup diagnosis_key from dim_diagnosis
+Insert relationship row
+
+bridge_encounter_procedures
+For each record:
+Lookup encounter_key
+Lookup procedure_key
+Insert relationship row
+
+Refresh Strategy 
+Frequency: Daily incremental load
+Load only new or updated encounters since last successful run
+
