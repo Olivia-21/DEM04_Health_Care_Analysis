@@ -20,7 +20,7 @@ CREATE TABLE departments (
   department_id INT PRIMARY KEY AUTO_INCREMENT,
   department_name VARCHAR(100),
   floor INT,
-  capacity INT
+  capacity INT  
 );
 
 -- Providers Table

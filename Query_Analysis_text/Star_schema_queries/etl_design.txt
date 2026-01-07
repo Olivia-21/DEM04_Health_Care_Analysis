@@ -1,78 +1,560 @@
-1. Dimension Load Logic
- dim_patient
-Source: OLTP patients
+The ETL process transforms normalized OLTP data into the denormalized star schema.
 
-Extract
-Read patient demographic data from the patients table. 
+ 1. Dimension Load Logic
 
-Transform
-Calculate patient age from date_of_birth
-Derive age_group (e.g 0-17, 18-35, 36-55, 55-70, 70+)
+ 1.1 dim_date (One-Time Load)
 
-Load
-Insert records into dim_patient
-Generate a surrogate key (patient_key)
-Retain patient_id as the business key for traceability back to OLTP 
+Approach: Generate dimension once for 10+ years, never update
 
-Change Handling 
-When patient demographic attributes change, overwrite the existing dimension record.  
-
-
-
-dim_date
-
-Extract
-Generate a continuous date range covering historical and future dates.
-
-Transform
-Derive date attributes such as year, month, quarter, day, month name and day of week
-
-Load
-Perform a one-time full load into dim_date
-Reuse this dimension for all fact table loads
-
-
-Update on Dimensions
+pseudocode
+PROCEDURE load_dim_date():
+    START_DATE = '2020-01-01'
+    END_DATE = '2026-12-31'
+    
+    FOR each date FROM START_DATE TO END_DATE:
+        date_key = format_as_YYYYMMDD(date)  // 20240515
+        year = extract_year(date)
+        quarter = calculate_quarter(date)
+        month = extract_month(date)
+        month_name = get_month_name(date)
+        day_of_month = extract_day(date)
+        day_of_week = get_day_of_week_number(date)  // 1=Monday
+        day_name = get_day_name(date)
+        week_of_year = get_week_number(date)
+     
+        
+        INSERT INTO dim_date VALUES (
+            date_key, date, year, quarter, month, month_name,
+            day_of_month, day_of_week, day_name, week_of_year, is_weekend
+        )
+    END FOR
+END PROCEDURE
 
 
+Frequency: Once at initial load, no updates needed
 
+Handling updates: Not applicable - dates don't change
+
+---
+
+1.2 dim_patient (Type 2 Slowly Changing Dimension)
+
+Approach: Incremental load with change detection
+
+pseudocode
+PROCEDURE load_dim_patient():
+    // For initial load or full refresh
+    TRUNCATE dim_patient
+    
+    FOR each patient IN patients:
+        age = calculate_age(patient.date_of_birth, CURRENT_DATE)
+        age_group = assign_age_group(age)  
+            // Logic: IF age < 18 THEN '0-17'
+            //        ELIF age < 40 THEN '18-35'
+            //        ELIF age < 65 THEN '36-55'
+            //        ELIF age < 56 THEN '56-70'
+            //        ELSE '70+'        
+        INSERT INTO dim_patient (
+            patient_id, first_name, last_name,
+            date_of_birth, age, age_group, gender, gender_desc, mrn
+        ) VALUES (
+            patient.patient_id, patient.first_name, patient.last_name, full_name,
+            patient.date_of_birth, age, age_group, 
+            patient.gender, patient.mrn
+        )
+    END FOR
+END PROCEDURE
+
+PROCEDURE incremental_load_dim_patient():
+    // For daily incremental updates
+    FOR each patient IN patients WHERE updated_date >= LAST_ETL_DATE:
+        existing_patient = SELECT FROM dim_patient WHERE patient_id = patient.patient_id
+        
+        IF existing_patient EXISTS:
+            // Type 2 SCD: expire old record, insert new
+            IF patient_has_changed(existing_patient, patient):
+                UPDATE dim_patient 
+                SET effective_end_date = CURRENT_DATE,
+                    is_current = FALSE
+                WHERE patient_key = existing_patient.patient_key
+                
+                INSERT new_record_with_updated_values
+                SET effective_start_date = CURRENT_DATE,
+                    is_current = TRUE
+            END IF
+        ELSE:
+            INSERT new patient record
+        END IF
+    END FOR
+END PROCEDURE
+
+Frequency: Daily incremental
+
+Handling updates: 
+- For analytical purposes, Type 1 (overwrite) for demographic changes
+- For compliance/audit needs, Type 2 (versioning) with effective_start_date/effective_end_date
+
+---
+
+1.3 dim_specialty (Type 1 Slowly Changing Dimension)
+
+Approach: Simple overwrite, changes are rare
+
+pseudocode
+PROCEDURE load_dim_specialty():
+    // Full refresh approach (small table)
+    FOR each specialty IN specialties:
+        existing = SELECT FROM dim_specialty WHERE specialty_id = specialty.specialty_id
+        
+        IF existing EXISTS:
+            UPDATE dim_specialty
+            SET specialty_name = specialty.specialty_name,
+                specialty_code = specialty.specialty_code
+            WHERE specialty_id = specialty.specialty_id
+        ELSE:
+            INSERT INTO dim_specialty (
+                specialty_id, specialty_name, specialty_code
+            ) VALUES (
+                specialty.specialty_id, specialty.specialty_name, specialty.specialty_code
+            )
+        END IF
+    END FOR
+END PROCEDURE
+
+Frequency: Weekly or on-demand (rarely changes)
+
+Handling updates: Type 1 (overwrite) - specialty names rarely change, and historical distinction isn't critical
+
+
+ 1.4 dim_department (Type 1 SCD)
+
+Approach: Similar to specialty
+
+pseudocode
+PROCEDURE load_dim_department():
+    FOR each department IN departments:
+        existing = SELECT FROM dim_department WHERE department_id = department.department_id
+        
+        IF existing EXISTS:
+            UPDATE dim_department
+            SET department_name = department.department_name,
+                floor = department.floor,
+                capacity = department.capacity
+            WHERE department_id = department.department_id
+        ELSE:
+            INSERT INTO dim_department (
+                department_id, department_name, floor, capacity
+            ) VALUES (
+                department.department_id, department.department_name, 
+                department.floor, department.capacity
+            )
+        END IF
+    END FOR
+END PROCEDURE
+
+Frequency: Weekly
+
+Handling updates: Type 1 (overwrite)
+
+---
+
+1.5 dim_provider (Type 2 SCD with Denormalization)
+
+Approach: Join to specialty and department, denormalize
+
+pseudocode
+PROCEDURE load_dim_provider():
+    FOR each provider IN providers:
+        // Lookup related dimensions
+        specialty = SELECT FROM specialties WHERE specialty_id = provider.specialty_id
+        department = SELECT FROM departments WHERE department_id = provider.department_id
+        
+        full_name = concat(provider.first_name, ' ', provider.last_name, ' ', provider.credential)
+        
+        existing = SELECT FROM dim_provider WHERE provider_id = provider.provider_id
+        
+        IF existing EXISTS AND provider_has_changed(existing, provider):
+            // Type 2: Keep history when specialty or department changes
+            UPDATE dim_provider
+            SET effective_end_date = CURRENT_DATE,
+                is_current = FALSE
+            WHERE provider_key = existing.provider_key
+            
+            INSERT INTO dim_provider (
+                provider_id, first_name, last_name, full_name, credential,
+                specialty_id, specialty_name, specialty_code,  // DENORMALIZED
+                department_id, department_name,                 // DENORMALIZED
+                effective_start_date, is_current
+            ) VALUES (
+                provider.provider_id, provider.first_name, provider.last_name, full_name,
+                provider.credential,
+                specialty.specialty_id, specialty.specialty_name, specialty.specialty_code,
+                department.department_id, department.department_name,
+                CURRENT_DATE, TRUE
+            )
+        ELSIF existing NOT EXISTS:
+            INSERT new provider record
+        END IF
+    END FOR
+END PROCEDURE
+```
+
+Frequency: Daily
+
+Handling updates: Type 2 (versioning) because provider specialty changes are analytically significant
+
+---
+
+1.6 dim_encounter_type (Static/Reference Data)
+
+Approach: Manual insert, rarely changes
+
+pseudocode
+PROCEDURE load_dim_encounter_type():
+    // Usually a one-time load
+    INSERT INTO dim_encounter_type VALUES
+        (1, 'Outpatient', 'Ambulatory'),
+        (2, 'Inpatient', 'Acute'),
+        (3, 'ER', 'Emergency'),
+        (4, 'Observation', 'Acute'),
+        (5, 'Telemedicine', 'Virtual')
+    ON DUPLICATE KEY UPDATE
+        encounter_type_category = VALUES(encounter_type_category)
+END PROCEDURE
+
+
+Frequency: One-time or on-demand
+
+---
+
+1.7 dim_diagnosis and dim_procedure
+
+Approach: Incremental load as new codes appear
+
+pseudocode
+PROCEDURE load_dim_diagnosis():
+    FOR each diagnosis IN diagnoses:
+        INSERT INTO dim_diagnosis (
+            diagnosis_id, icd10_code, icd10_description
+        ) VALUES (
+            diagnosis.diagnosis_id, diagnosis.icd10_code, diagnosis.icd10_description
+        )
+        ON DUPLICATE KEY UPDATE
+            icd10_description = diagnosis.icd10_description
+    END FOR
+END PROCEDURE
+
+PROCEDURE load_dim_procedure():
+    FOR each procedure IN procedures:
+        INSERT INTO dim_procedure (
+            procedure_id, cpt_code, cpt_description
+        ) VALUES (
+            procedure.procedure_id, procedure.cpt_code, procedure.cpt_description
+        )
+        ON DUPLICATE KEY UPDATE
+            cpt_description = procedure.cpt_description
+    END FOR
+END PROCEDURE
+
+
+Frequency: Daily incremental
+
+---
 
 2. Fact Table Load Logic
-fact_encounters
-Grain: One row per encounter
-Source: Encounters, billing, encounter_diagnoses, encounter_procedures
 
-Lookup foreign keys from dimensions
-patient_key
-provider_key
-specialty_key
-department_key
-encounter_type_key
-date_key 
+2.1 fact_encounters (Incremental Daily Load)
 
-Calculate pre-aggregated metrics:
-diagnosis_count - count of diagnoses per encounter
-procedure_count - count of procedures per encounter
-total-allowed_amount - sum of allowed amount from billing
+Approach: Load new encounters, calculate pre-aggregated metrics
 
-Missing Data Handling 
-Use default 'Unknown' dimension rows when lookups fail
+pseudocode
+PROCEDURE load_fact_encounters():
+    // Determine which encounters to load
+    new_encounters = SELECT * FROM encounters 
+                     WHERE encounter_date >= LAST_ETL_DATE
+                        OR updated_date >= LAST_ETL_DATE
+    
+    FOR each encounter IN new_encounters:
+        // === DIMENSION KEY LOOKUPS ===
+        encounter_date_key = format_as_YYYYMMDD(encounter.encounter_date)
+        discharge_date_key = IF encounter.discharge_date IS NOT NULL 
+                             THEN format_as_YYYYMMDD(encounter.discharge_date)
+                             ELSE NULL
+        
+        patient_key = SELECT patient_key FROM dim_patient 
+                      WHERE patient_id = encounter.patient_id
+                      AND is_current = TRUE
+        
+        provider_key = SELECT provider_key FROM dim_provider 
+                       WHERE provider_id = encounter.provider_id
+                       AND effective_start_date <= encounter.encounter_date
+                       AND (effective_end_date IS NULL OR effective_end_date > encounter.encounter_date)
+        
+        specialty_key = SELECT specialty_key FROM dim_specialty
+                        WHERE specialty_id = (
+                            SELECT specialty_id FROM dim_provider WHERE provider_key = provider_key
+                        )
+        
+        department_key = SELECT department_key FROM dim_department
+                         WHERE department_id = encounter.department_id
+        
+        encounter_type_key = SELECT encounter_type_key FROM dim_encounter_type
+                             WHERE encounter_type_name = encounter.encounter_type
+        
+        // === CALCULATE PRE-AGGREGATED METRICS ===
+        
+        // Diagnosis count
+        diagnosis_count = SELECT COUNT(*) FROM encounter_diagnoses 
+                          WHERE encounter_id = encounter.encounter_id
+        
+        // Procedure count
+        procedure_count = SELECT COUNT(*) FROM encounter_procedures
+                          WHERE encounter_id = encounter.encounter_id
+        
+        // Billing aggregates
+        billing_data = SELECT 
+                           SUM(claim_amount) as total_claim,
+                           SUM(allowed_amount) as total_allowed,
+                           COUNT(*) as bill_count
+                       FROM billing
+                       WHERE encounter_id = encounter.encounter_id
+        
+        // Length of stay
+        IF encounter.discharge_date IS NOT NULL:
+            length_of_stay = DATEDIFF(encounter.discharge_date, encounter.encounter_date)
+        ELSE:
+            length_of_stay = NULL
+        
+        // === READMISSION CALCULATION ===
+        is_inpatient = (encounter.encounter_type = 'Inpatient')
+        
+        IF is_inpatient AND encounter.discharge_date IS NOT NULL:
+            // Look for previous discharge
+            previous_encounter = SELECT encounter_date, discharge_date
+                                 FROM encounters
+                                 WHERE patient_id = encounter.patient_id
+                                   AND encounter_type = 'Inpatient'
+                                   AND discharge_date IS NOT NULL
+                                   AND discharge_date < encounter.encounter_date
+                                 ORDER BY discharge_date DESC
+                                 LIMIT 1
+            
+            IF previous_encounter EXISTS:
+                days_since_last = DATEDIFF(encounter.encounter_date, previous_encounter.discharge_date)
+                is_readmission = (days_since_last <= 30)
+                previous_discharge_date = previous_encounter.discharge_date
+                days_since_last_discharge = days_since_last
+            ELSE:
+                is_readmission = FALSE
+                previous_discharge_date = NULL
+                days_since_last_discharge = NULL
+            END IF
+        ELSE:
+            is_readmission = FALSE
+        END IF
+        
+        // === INSERT INTO FACT TABLE ===
+        INSERT INTO fact_encounters (
+            encounter_id,
+            encounter_date_key, discharge_date_key,
+            patient_key, provider_key, specialty_key, department_key, encounter_type_key,
+            encounter_date, discharge_date, length_of_stay_days,
+            diagnosis_count, procedure_count,
+            total_claim_amount, total_allowed_amount, billing_count,
+            is_inpatient, previous_discharge_date, is_readmission, days_since_last_discharge
+        ) VALUES (
+            encounter.encounter_id,
+            encounter_date_key, discharge_date_key,
+            patient_key, provider_key, specialty_key, department_key, encounter_type_key,
+            encounter.encounter_date, encounter.discharge_date, length_of_stay,
+            diagnosis_count, procedure_count,
+            billing_data.total_claim, billing_data.total_allowed, billing_data.bill_count,
+            is_inpatient, previous_discharge_date, is_readmission, days_since_last_discharge
+        )
+        ON DUPLICATE KEY UPDATE
+            // Update if encounter modified
+            discharge_date_key = VALUES(discharge_date_key),
+            discharge_date = VALUES(discharge_date),
+            length_of_stay_days = VALUES(length_of_stay_days),
+            diagnosis_count = VALUES(diagnosis_count),
+            procedure_count = VALUES(procedure_count),
+            total_claim_amount = VALUES(total_claim_amount),
+            total_allowed_amount = VALUES(total_allowed_amount),
+            billing_count = VALUES(billing_count),
+            is_readmission = VALUES(is_readmission)
+    END FOR
+END PROCEDURE
 
 
-3. Bridge Table Logic 
-bridge_encounter_diagnoses
-For each record: 
-Lookup encounter_key from fact_encounters
-Lookup diagnosis_key from dim_diagnosis
-Insert relationship row
+Frequency: Daily (after OLTP batch processes complete)
 
-bridge_encounter_procedures
-For each record:
-Lookup encounter_key
-Lookup procedure_key
-Insert relationship row
+Handling missing data:
+- If patient_key not found: Log error, skip encounter 
+- If billing data missing: Set amounts to 0, flag for review
+- If discharge_date NULL: Set discharge_date_key to NULL, length_of_stay to NULL
 
-Refresh Strategy 
-Frequency: Daily incremental load
-Load only new or updated encounters since last successful run
+
+
+ 3. Bridge Table Load Logic
+
+ 3.1 bridge_encounter_diagnoses
+
+Approach: Load in sync with fact table
+
+pseudocode
+PROCEDURE load_bridge_encounter_diagnoses():
+    // Load diagnoses for newly loaded encounters
+    new_encounters = SELECT encounter_key, encounter_id 
+                     FROM fact_encounters 
+                     WHERE load_date >= LAST_ETL_DATE
+    
+    FOR each encounter IN new_encounters:
+        diagnoses_list = SELECT ed.diagnosis_id, ed.diagnosis_sequence, d.diagnosis_key
+                         FROM encounter_diagnoses ed
+                         JOIN dim_diagnosis d ON ed.diagnosis_id = d.diagnosis_id
+                         WHERE ed.encounter_id = encounter.encounter_id
+        
+        FOR each diagnosis IN diagnoses_list:
+            INSERT INTO bridge_encounter_diagnoses (
+                encounter_key,
+                diagnosis_key,
+                diagnosis_sequence
+            ) VALUES (
+                encounter.encounter_key,
+                diagnosis.diagnosis_key,
+                diagnosis.diagnosis_sequence
+            )
+        END FOR
+    END FOR
+END PROCEDURE
+
+
+Frequency: Daily, immediately after fact_encounters load
+
+---
+
+3.2 bridge_encounter_procedures
+
+Approach: Similar to diagnoses bridge
+
+pseudocode
+PROCEDURE load_bridge_encounter_procedures():
+    new_encounters = SELECT encounter_key, encounter_id 
+                     FROM fact_encounters 
+                     WHERE load_date >= LAST_ETL_DATE
+    
+    FOR each encounter IN new_encounters:
+        procedures_list = SELECT ep.procedure_id, ep.procedure_date, p.procedure_key
+                          FROM encounter_procedures ep
+                          JOIN dim_procedure p ON ep.procedure_id = p.procedure_id
+                          WHERE ep.encounter_id = encounter.encounter_id
+        
+        FOR each procedure IN procedures_list:
+            INSERT INTO bridge_encounter_procedures (
+                encounter_key,
+                procedure_key,
+                procedure_date
+            ) VALUES (
+                encounter.encounter_key,
+                procedure.procedure_key,
+                procedure.procedure_date
+            )
+        END FOR
+    END FOR
+END PROCEDURE
+
+Frequency: Daily, immediately after fact_encounters load
+
+
+
+4. Refresh Strategy
+DAILY ETL JOB 
+Load Dimensions (incremental)
+dim_patient (Type 2 SCD)
+dim_provider (Type 2 SCD)
+dim_specialty, dim_department (weekly)
+load fact_encounters (incremental)
+
+4.3 Handling Late-Arriving Facts
+pseudocode
+PROCEDURE handle_late_arriving_billing():
+    // Check for billing records added after encounter load
+    late_bills = SELECT b.encounter_id, b.allowed_amount, b.claim_amount
+                 FROM billing b
+                 JOIN fact_encounters f ON b.encounter_id = f.encounter_id
+                 WHERE b.claim_date > f.load_date
+    
+    FOR each bill IN late_bills:
+        encounter_key = SELECT encounter_key FROM fact_encounters
+                        WHERE encounter_id = bill.encounter_id
+        
+        // Recalculate aggregates
+        new_totals = SELECT 
+                         SUM(claim_amount) as total_claim,
+                         SUM(allowed_amount) as total_allowed,
+                         COUNT(*) as bill_count
+                     FROM billing
+                     WHERE encounter_id = bill.encounter_id
+        
+        UPDATE fact_encounters
+        SET total_claim_amount = new_totals.total_claim,
+            total_allowed_amount = new_totals.total_allowed,
+            billing_count = new_totals.bill_count,
+            last_updated = CURRENT_TIMESTAMP
+        WHERE encounter_key = encounter_key
+    END FOR
+END PROCEDURE
+
+Run frequency: Daily before main ETL
+
+5. Data Quality & Error Handling
+
+### 5.1 Validation Rules
+
+```pseudocode
+PROCEDURE validate_fact_load():
+    // Check referential integrity
+    orphan_encounters = SELECT COUNT(*) FROM fact_encounters f
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM dim_patient p WHERE p.patient_key = f.patient_key
+                        )
+    
+    IF orphan_encounters > 0:
+        ALERT("Found {orphan_encounters} encounters with missing patients")
+        ROLLBACK
+    END IF
+    
+    // Check for negative values
+    invalid_amounts = SELECT COUNT(*) FROM fact_encounters
+                      WHERE total_allowed_amount < 0
+    
+    IF invalid_amounts > 0:
+        ALERT("Found negative billing amounts")
+        // Don't rollback, but flag for review
+    END IF
+    
+    // Check date logic
+    invalid_dates = SELECT COUNT(*) FROM fact_encounters
+                    WHERE discharge_date < encounter_date
+    
+    IF invalid_dates > 0:
+        ALERT("Found {invalid_dates} encounters where discharge before admission")
+    END IF
+END PROCEDURE
+
+
+5.2 Error Logging
+
+pseudocode
+CREATE TABLE etl_error_log (
+    error_id INT PRIMARY KEY AUTO_INCREMENT,
+    etl_job_name VARCHAR(100),
+    error_timestamp DATETIME,
+    source_table VARCHAR(100),
+    source_record_id INT,
+    error_message TEXT,
+    error_severity VARCHAR(20)  -- 'WARNING', 'ERROR', 'CRITICAL'
+)
+
+
 

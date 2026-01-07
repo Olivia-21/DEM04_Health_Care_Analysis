@@ -19,17 +19,20 @@ Choosing a finer grain (diagnosis-level or procedure-level) would unnecessarily 
 
 Decision 2: Dimension Tables
 
-dim_date
-date_key (PK, surrogate)
-calendar_date
-year
-month
-month_name
-quarter
-day_of_month
-day_of_week
+Dimension Date (dim_date)
+date_key (INT, PK) - Surrogate key in YYYYMMDD format
+calendar_date (DATE) - Actual date
+year (INT)
+quarter (INT) - 1, 2, 3, 4
+month (INT) - 1-12
+month_name (VARCHAR) - "January", "February", etc.
+day_of_month (INT) - 1-31
+day_of_week (INT) - 1-7
+day_name (VARCHAR) - "Monday", "Tuesday", etc.
+week_of_year (INT) - 1-53
 
-dim_patient
+
+Dimension patient (dim_patient)
 patient_key (PK)
 patient_id (business key)
 first_name
@@ -38,27 +41,56 @@ gender
 date_of_birth
 age 
 age_group
+mrn
 
-dim_provider
-provider_key (PK)
+Dimension provider(dim_provider)
+provider_key 
 provider_id
-provider_name
+first_name 
+last_name 
+full_name 
 credential
-specialty_key
-department_key
-
+specialty_id 
+specialty_name
+specialty_code
+department_id
+department_name 
 dim_specialty
-specialty_key (PK)
+specialty_key 
 specialty_id
 specialty_name
 specialty_code
 
-dim_department
-encounter_type_key (PK)
-encounter_type_name (Outpatient, Inpatient, ER)
+Dimension specialty (dim_specialty)
+specialty_key
+specialty_id
+specialty_name
+specialty_code
 
-Additional Dimensions
-Diagnoses and procedures are modeled using bridge tables, not dimensions directly joined to the fact. 
+
+Dimension Depatment (dim_department)
+department_key
+depeartment_id
+department_name
+floor
+capacity
+
+Dimension Encounter Type (dim_encounter_type)
+encounter_type_key 
+encounter_type_name
+
+Dimension Procedure (dim_procedure)
+procedure_key
+procedure_id
+cpt_code
+cpt_description
+
+Dimension diagnosis (dim_diagnosis)
+diagnosis_key
+diagnosis_id
+icd10_code
+icd10_description
+
 
  
 Decision 3: Pre-Aggregated Metrics
@@ -68,7 +100,10 @@ diagnosis_count
 procedure_count
 total_claim_amount
 total_allowed_amount
+billing_count
 length_of_stay_days
+is_readmission
+days_since_last_discharge 
 
 Why Pre-Aggregation Helps Performance
 Avoids expensive joins to diagnoses, procedure, and billing tables

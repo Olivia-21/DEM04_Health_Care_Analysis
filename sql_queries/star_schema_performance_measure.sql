@@ -1,52 +1,81 @@
 -- Question 1: Monthly Encounters by Specialty
 EXPLAIN ANALYZE
-SELECT
-  d.year,
-  d.month,
-  s.specialty_name,
-  et.encounter_type_name,
-  COUNT(*) AS total_encounters
+SELECT 
+    d.year,
+    d.month,
+    d.month_name,
+    p.specialty_name,
+    et.encounter_type_name,
+    COUNT(f.encounter_key) AS total_encounters,
+    COUNT(DISTINCT f.patient_key) AS unique_patients
 FROM fact_encounters f
-JOIN dim_date d ON f.date_key = d.date_key
-JOIN dim_specialty s ON f.specialty_key = s.specialty_key
+JOIN dim_date d ON f.encounter_date_key = d.date_key
+JOIN dim_provider p ON f.provider_key = p.provider_key
 JOIN dim_encounter_type et ON f.encounter_type_key = et.encounter_type_key
-GROUP BY d.year, d.month, s.specialty_name, et.encounter_type_name;
+GROUP BY 
+    d.year,
+    d.month,
+    d.month_name,
+    p.specialty_name,
+    et.encounter_type_name
+ORDER BY d.year, d.month, p.specialty_name, et.encounter_type_name;
+
+
 
 -- Question 2 Diagnosis–Procedure Pairs
 EXPLAIN ANALYZE
-SELECT
-  bd.diagnosis_code,
-  bp.procedure_code,
-  COUNT(*) AS encounter_count
+SELECT 
+    d.icd10_code,
+    d.icd10_description,
+    pr.cpt_code,
+    pr.cpt_description,
+    COUNT(DISTINCT bd.encounter_key) AS encounter_count
 FROM bridge_encounter_diagnoses bd
-JOIN bridge_encounter_procedures bp
-  ON bd.encounter_key = bp.encounter_key
-GROUP BY bd.diagnosis_code, bp.procedure_code;
+JOIN dim_diagnosis d ON bd.diagnosis_key = d.diagnosis_key
+JOIN bridge_encounter_procedures bp ON bd.encounter_key = bp.encounter_key
+JOIN dim_procedure pr ON bp.procedure_key = pr.procedure_key
+GROUP BY 
+    d.icd10_code,
+    d.icd10_description,
+    pr.cpt_code,
+    pr.cpt_description
+ORDER BY encounter_count DESC;
 
 -- Question 3 Readmission Rate
 EXPLAIN ANALYZE
-SELECT
-  s.specialty_name,
-  COUNT(*) AS readmissions
-FROM fact_encounters f1
-JOIN fact_encounters f2
-  ON f1.patient_key = f2.patient_key
- AND f2.date_key BETWEEN f1.date_key AND f1.date_key + 30
-JOIN dim_specialty s
-  ON f1.specialty_key = s.specialty_key
-WHERE f1.encounter_type_key = 2
-GROUP BY s.specialty_name;
+SELECT 
+    p.specialty_name,
+    COUNT(f.encounter_key) AS total_inpatient_discharges,
+    SUM(f.is_readmission) AS readmission_count,
+    ROUND(SUM(f.is_readmission) * 100.0 / COUNT(f.encounter_key), 2) AS readmission_rate_pct
+FROM fact_encounters f
+JOIN dim_provider p ON f.provider_key = p.provider_key
+WHERE f.is_inpatient = TRUE
+  AND f.discharge_date IS NOT NULL
+GROUP BY p.specialty_name
+ORDER BY readmission_rate_pct DESC;
 
+-- =====================================
 -- Question 4 Revenue by Specialty & Month
 EXPLAIN ANALYZE
-SELECT
-  d.year,
-  d.month,
-  s.specialty_name,
-  SUM(f.total_allowed_amount) AS revenue
+SELECT 
+    d.year,
+    d.month,
+    d.month_name,
+    p.specialty_name,
+    COUNT(f.encounter_key) AS encounter_count,
+    SUM(f.total_allowed_amount) AS total_revenue
 FROM fact_encounters f
-JOIN dim_date d ON f.date_key = d.date_key
-JOIN dim_specialty s ON f.specialty_key = s.specialty_key
-GROUP BY d.year, d.month, s.specialty_name;
+JOIN dim_date d ON f.encounter_date_key = d.date_key
+JOIN dim_provider p ON f.provider_key = p.provider_key
+GROUP BY 
+    d.year,
+    d.month,
+    d.month_name,
+    p.specialty_name
+ORDER BY d.year, d.month, total_revenue DESC;
 
-SELECT COUNT(*) FROM fact_encounters;
+
+
+
+

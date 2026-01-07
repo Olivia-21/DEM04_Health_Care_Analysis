@@ -18,7 +18,7 @@ CREATE TABLE dim_date (
 -- ======================
 CREATE TABLE dim_patient (
   patient_key INT AUTO_INCREMENT PRIMARY KEY,
-  patient_id INT NOT NULL,
+  patient_id INT NOT NULL UNIQUE,
   first_name VARCHAR(100),
   last_name VARCHAR(100),
   gender CHAR(1),
@@ -26,9 +26,8 @@ CREATE TABLE dim_patient (
   age INT,
   age_group VARCHAR(20),
   mrn VARCHAR(20),
-  UNIQUE (patient_id)
+  INDEX idx_patient_id (patient_id)
 );
-
 
 -- ======================
 -- Specialty Dimension
@@ -38,76 +37,172 @@ CREATE TABLE dim_specialty (
   specialty_id INT NOT NULL,
   specialty_name VARCHAR(100),
   specialty_code VARCHAR(10), 
-  UNIQUE (specialty_id)
+  INDEX idx_specialty_id (specialty_id)
 );
-
 
 -- ======================
 -- Department Dimension
 -- ======================
 CREATE TABLE dim_department (
   department_key INT AUTO_INCREMENT PRIMARY KEY,
-  department_id INT NOT NULL,
+  department_id INT NOT NULL UNIQUE,
   department_name VARCHAR(100),
   floor INT, 
   capacity INT,
-  UNIQUE (department_id)
+  INDEX idx_department_id (department_id)
 );
 
--- drop table dim_provider;
+
 -- ======================
 -- Provider Dimension
 -- ======================
 CREATE TABLE dim_provider (
   provider_key INT AUTO_INCREMENT PRIMARY KEY,
   provider_id INT,
-  provider_name VARCHAR(200),
+  first_name VARCHAR(100),
+  last_name VARCHAR(100),
   credential VARCHAR(20),
-  specialty_key INT,
-  department_key INT
+  specialty_id INT,
+  specialty_name VARCHAR(100),
+  specialty_code VARCHAR(10),
+  department_id INT,
+  department_name VARCHAR(100),
+  INDEX idx_provider_id (provider_id),
+  INDEX idx_specialty_name (specialty_name)
+);
+
+-- =========================
+-- Diagnosis Dimension
+-- =========================
+CREATE TABLE dim_diagnosis (
+    diagnosis_key INT PRIMARY KEY AUTO_INCREMENT,
+    diagnosis_id INT NOT NULL UNIQUE,
+    icd10_code VARCHAR(10) NOT NULL,
+    icd10_description VARCHAR(200),
+    INDEX idx_diagnosis_id (diagnosis_id),
+    INDEX idx_icd10_code (icd10_code)
+);
+
+-- =========================
+-- Procedure Dimension
+-- =========================
+CREATE TABLE dim_procedure (
+    procedure_key INT PRIMARY KEY AUTO_INCREMENT,
+    procedure_id INT NOT NULL UNIQUE,
+    cpt_code VARCHAR(10) NOT NULL,
+    cpt_description VARCHAR(200),
+    INDEX idx_procedure_id (procedure_id),
+    INDEX idx_cpt_code (cpt_code)
 );
 
 
-drop table dim_encounter_type;
 -- ======================
 -- Encounter Type Dimension
 -- ======================
 CREATE TABLE dim_encounter_type (
   encounter_type_key INT AUTO_INCREMENT PRIMARY KEY,
-  encounter_type_name VARCHAR(50)
+  encounter_type_name VARCHAR(50) NOT NULL UNIQUE, 
+  INDEX idx_type_name (encounter_type_name)
 );
+
 
 -- ======================
 -- Fact Table
 -- ======================
 CREATE TABLE fact_encounters (
-  encounter_key INT AUTO_INCREMENT PRIMARY KEY,
-  encounter_id INT,
-  date_key INT,
-  patient_key INT,
-  provider_key INT,
-  specialty_key INT,
-  department_key INT,
-  encounter_type_key INT,
-  diagnosis_count INT,
-  procedure_count INT,
-  total_claim_amount DECIMAL(12,2),
-  total_allowed_amount DECIMAL(12,2),
-  length_of_stay_days INT,
-  INDEX idx_date (date_key),
-  INDEX idx_specialty (specialty_key)
+    encounter_key INT PRIMARY KEY AUTO_INCREMENT,
+    encounter_id INT NOT NULL UNIQUE,
+    
+    -- Foreign Keys to Dimensions
+    encounter_date_key INT NOT NULL,
+    discharge_date_key INT,
+    patient_key INT NOT NULL,
+    provider_key INT NOT NULL,
+    specialty_key INT NOT NULL,
+    department_key INT NOT NULL,
+    encounter_type_key INT NOT NULL,
+    
+    -- Encounter Details
+    encounter_date DATETIME NOT NULL,
+    discharge_date DATETIME,
+    length_of_stay_days INT,
+    
+    -- Pre-aggregated Metrics (to avoid expensive JOINs)
+    diagnosis_count INT DEFAULT 0,
+    procedure_count INT DEFAULT 0,
+    
+    -- Financial Metrics (pre-aggregated from billing)
+    total_claim_amount DECIMAL(12, 2) DEFAULT 0,
+    total_allowed_amount DECIMAL(12, 2) DEFAULT 0,
+    billing_count INT DEFAULT 0,
+    
+    -- Readmission Analysis Helper
+    is_inpatient BOOLEAN,
+    previous_discharge_date DATETIME,
+    is_readmission BOOLEAN DEFAULT FALSE,
+    days_since_last_discharge INT,
+    
+    -- Foreign Key Constraints
+    FOREIGN KEY (encounter_date_key) REFERENCES dim_date(date_key),
+    FOREIGN KEY (discharge_date_key) REFERENCES dim_date(date_key),
+    FOREIGN KEY (patient_key) REFERENCES dim_patient(patient_key),
+    FOREIGN KEY (provider_key) REFERENCES dim_provider(provider_key),
+    FOREIGN KEY (specialty_key) REFERENCES dim_specialty(specialty_key),
+    FOREIGN KEY (department_key) REFERENCES dim_department(department_key),
+    FOREIGN KEY (encounter_type_key) REFERENCES dim_encounter_type(encounter_type_key),
+    
+    -- Indexes for Performance
+    INDEX idx_encounter_id (encounter_id),
+    INDEX idx_encounter_date_key (encounter_date_key),
+    INDEX idx_patient_key (patient_key),
+    INDEX idx_provider_key (provider_key),
+    INDEX idx_specialty_key (specialty_key),
+    INDEX idx_encounter_type_key (encounter_type_key),
+    INDEX idx_readmission (is_readmission, specialty_key),
+    INDEX idx_date_specialty (encounter_date_key, specialty_key),
+    INDEX idx_patient_encounter_date (patient_key, encounter_date)
 );
 
 -- ======================
 -- Bridge Tables
 -- ======================
+
+
 CREATE TABLE bridge_encounter_diagnoses (
-  encounter_key INT,
-  diagnosis_code VARCHAR(10)
+    bridge_diagnosis_key INT PRIMARY KEY AUTO_INCREMENT,
+    encounter_key INT NOT NULL,
+    diagnosis_key INT NOT NULL,
+    diagnosis_sequence INT, -- Primary, Secondary, etc.
+    
+    FOREIGN KEY (encounter_key) REFERENCES fact_encounters(encounter_key),
+    FOREIGN KEY (diagnosis_key) REFERENCES dim_diagnosis(diagnosis_key),
+    
+    INDEX idx_encounter_key (encounter_key),
+    INDEX idx_diagnosis_key (diagnosis_key),
+    INDEX idx_encounter_diagnosis (encounter_key, diagnosis_key),
+    
+    UNIQUE KEY uk_encounter_diagnosis_seq (encounter_key, diagnosis_key, diagnosis_sequence)
 );
 
+-- Bridge: Encounter to Procedures (preserves many-to-many relationship)
 CREATE TABLE bridge_encounter_procedures (
-  encounter_key INT,
-  procedure_code VARCHAR(10)
+    bridge_procedure_key INT PRIMARY KEY AUTO_INCREMENT,
+    encounter_key INT NOT NULL,
+    procedure_key INT NOT NULL,
+    procedure_date DATE,
+    
+    FOREIGN KEY (encounter_key) REFERENCES fact_encounters(encounter_key),
+    FOREIGN KEY (procedure_key) REFERENCES dim_procedure(procedure_key),
+    
+    INDEX idx_encounter_key (encounter_key),
+    INDEX idx_procedure_key (procedure_key),
+    INDEX idx_encounter_procedure (encounter_key, procedure_key),
+    
+    UNIQUE KEY uk_encounter_procedure (encounter_key, procedure_key, procedure_date)
 );
+
+
+
+
+
 
