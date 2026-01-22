@@ -32,7 +32,9 @@ CREATE TABLE providers (
   specialty_id INT,
   department_id INT,
   FOREIGN KEY (specialty_id) REFERENCES specialties (specialty_id),
-  FOREIGN KEY (department_id) REFERENCES departments (department_id)
+  FOREIGN KEY (department_id) REFERENCES departments (department_id),
+  INDEX idx_specialty_id (specialty_id),      -- For JOINs to specialties (Q1, Q3, Q4)
+  INDEX idx_department_id (department_id)     -- For JOINs to departments
 );
 
 -- Encounters Table
@@ -47,7 +49,11 @@ CREATE TABLE encounters (
   FOREIGN KEY (patient_id) REFERENCES patients (patient_id),
   FOREIGN KEY (provider_id) REFERENCES providers (provider_id),
   FOREIGN KEY (department_id) REFERENCES departments (department_id),
-  INDEX idx_encounter_date (encounter_date)
+  INDEX idx_encounter_date (encounter_date),   -- For date filtering (Q1, Q4)
+  INDEX idx_patient_id (patient_id),           -- For JOINs and readmission self-join (Q3)
+  INDEX idx_provider_id (provider_id),         -- For JOINs to providers (Q1, Q3, Q4)
+  INDEX idx_encounter_type (encounter_type),   -- For filtering Inpatient (Q3)
+  INDEX idx_patient_discharge (patient_id, discharge_date)  -- Composite for readmission query (Q3)
 );
 
 -- Diagnoses Table
@@ -64,7 +70,9 @@ CREATE TABLE encounter_diagnoses (
   diagnosis_id INT,
   diagnosis_sequence INT,
   FOREIGN KEY (encounter_id) REFERENCES encounters (encounter_id),
-  FOREIGN KEY (diagnosis_id) REFERENCES diagnoses (diagnosis_id)
+  FOREIGN KEY (diagnosis_id) REFERENCES diagnoses (diagnosis_id),
+  INDEX idx_encounter_id (encounter_id),       -- For JOINs to encounters (Q2)
+  INDEX idx_diagnosis_id (diagnosis_id)        -- For JOINs to diagnoses (Q2)
 );
 
 -- Procedures Table
@@ -81,7 +89,9 @@ CREATE TABLE encounter_procedures (
   procedure_id INT,
   procedure_date DATE,
   FOREIGN KEY (encounter_id) REFERENCES encounters (encounter_id),
-  FOREIGN KEY (procedure_id) REFERENCES procedures (procedure_id)
+  FOREIGN KEY (procedure_id) REFERENCES procedures (procedure_id),
+  INDEX idx_encounter_id (encounter_id),       -- For JOINs to encounters (Q2)
+  INDEX idx_procedure_id (procedure_id)        -- For JOINs to procedures (Q2)
 );
 
 -- Billing Table
@@ -93,7 +103,8 @@ CREATE TABLE billing (
   claim_date DATE,
   claim_status VARCHAR (50),
   FOREIGN KEY (encounter_id) REFERENCES encounters (encounter_id),
-  INDEX idx_claim_date (claim_date)
+  INDEX idx_claim_date (claim_date),           -- For date filtering (Q4)
+  INDEX idx_encounter_id (encounter_id)        -- For JOINs to encounters (Q4)
 );
 
 

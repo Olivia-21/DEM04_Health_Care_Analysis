@@ -1,5 +1,5 @@
 # Part 4: Analysis & Reflection
-git 
+
 ## Why Is the Star Schema Faster?
 
 The star schema is significantly faster than the normalized OLTP schema because it is designed specifically for **analytical workloads**, not transactions. The performance improvement comes from fewer JOINs, pre-computed data, and denormalization.
@@ -16,11 +16,17 @@ Each JOIN increases query cost by:
 - Larger intermediate result sets  
 - More index lookups  
 
-In the star schema:
-- The fact table connects **directly** to all dimensions  
-- The same query becomes: `fact_encounters → dim_date → dim_provider` (2 tables)
+In the star schema with denormalization:
+- Key attributes (specialty_name, encounter_type_name, date components) are stored directly in the fact table
+- Queries like Q1, Q3, and Q4 require **ZERO JOINs** - they operate on the fact table alone
 
-Reducing the number of JOINs lowers execution time because the database processes fewer tables and moves less data between them. This is one of the largest contributors to the performance gain.
+| Query | OLTP JOINs | Star Schema JOINs |
+|-------|------------|-------------------|
+| Q1    | 2          | 0                 |
+| Q3    | 3          | 0                 |
+| Q4    | 3          | 0                 |
+
+Reducing JOINs dramatically lowers execution time because the database processes fewer tables and moves less data between them. This is the largest contributor to performance gains.
 
 ---
 
@@ -63,7 +69,7 @@ Denormalization favors **read performance**, which is exactly what analytical sy
 
 ### What We Gained
 
-- **Much faster queries** (5–20× improvement)
+- **Faster queries** (1.07–3.4× improvement on tested queries)
 - **Simpler SQL**
   - Fewer JOINs  
   - No complex self-joins or date calculations  
@@ -129,25 +135,36 @@ Given the workload, bridge tables are the better design choice.
 
 ## Performance Quantification
 
-### Query 3: 30-Day Readmission Rate
+### Query 1: Monthly Encounters by Specialty
 
-- **OLTP execution time:** 4.5 seconds  
-- **Star schema execution time:** 0.2 seconds  
-- **Improvement:** 22.5× faster  
+- **OLTP execution time:** 51.5ms (2 JOINs)
+- **Star schema execution time:** ~35ms (0 JOINs)
+- **Improvement:** 1.5× faster
 
 **Main reason:**  
-The star schema eliminates an expensive self-join by using a pre-computed `is_readmission` flag.
+All grouping attributes (specialty_name, encounter_type_name, year, month) are denormalized into the fact table, eliminating all JOINs.
+
+---
+
+### Query 3: 30-Day Readmission Rate
+
+- **OLTP execution time:** 51.1ms (3 JOINs: self-join + providers + specialties)
+- **Star schema execution time:** 14.9ms (0 JOINs)
+- **Improvement:** 3.4× faster
+
+**Main reason:**  
+The `is_readmission` flag is pre-computed during ETL, and `specialty_name` is denormalized into the fact table. The OLTP query requires an expensive self-join and date comparisons.
 
 ---
 
 ### Query 4: Revenue by Specialty & Month
 
-- **OLTP execution time:** 1.8 seconds  
-- **Star schema execution time:** 0.18 seconds  
-- **Improvement:** 10× faster  
+- **OLTP execution time:** 85.5ms (3 JOINs)
+- **Star schema execution time:** ~45ms (0 JOINs)
+- **Improvement:** 1.9× faster
 
 **Main reason:**  
-Billing totals are pre-aggregated in the fact table, eliminating the JOIN to the billing table and reducing aggregation cost.
+`total_allowed_amount` is pre-aggregated, and `specialty_name` + date attributes are denormalized. The OLTP requires billing → encounters → providers → specialties chain.
 
 ---
 
