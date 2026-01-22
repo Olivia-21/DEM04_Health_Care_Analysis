@@ -29,6 +29,8 @@ JOIN procedures pr ON ep.procedure_id = pr.procedure_id
 GROUP BY d.icd10_code, pr.cpt_code
 ORDER BY encounter_count DESC;
 
+
+
 -- Question 3: 30-Day Readmission Rate
 EXPLAIN ANALYZE
 SELECT

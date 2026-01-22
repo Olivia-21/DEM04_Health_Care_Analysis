@@ -17,16 +17,16 @@ GROUP BY
     e.encounter_type
 ORDER BY encounter_month, specialty_name;
 
-
 SCHEMA ANALYSIS:
 Tables joined: encounters, providers and specialties.
 Number of joins: 2
 Performance:
-Execution time: 51.5ms
-Estimated rows scanned: 9996 rows
+Execution time: 81.6ms
+Sorted rows: 10,000
+Rows Examined: 21020 rows
 Bottleneck Identified: Expensive GROUP BY with sorting and COUNT (DISTINCT) after processing a large intermediate result set. 
 Why is this slow?
-Ans: The query is slow because MySQL must process and sort nearly 10,000 intermediate rows created by joins before performing a GROUP BY aggregation that includes a COUNT (DISTINCT patient_id), which requires additional deduplication. 
+Ans: The query is slow because MySQL must process and sort 10,000 intermediate rows created by joins before performing a GROUP BY aggregation that includes a COUNT (DISTINCT patient_id), which requires additional deduplication. 
 
 What's the root cause?
 Ans: The root cause is the normalized OLTP schema, which requires multiple joins to retrieve specialty information and perform aggregation at query runtime. 
@@ -53,13 +53,13 @@ JOIN procedures pr ON ep.procedure_id = pr.procedure_id
 GROUP BY d.icd10_code, pr.cpt_code
 ORDER BY encounter_count DESC;
 
-
 SCHEMA ANALYSIS:
 Tables joined: encounter_diagnoses, diagnoses, encounter_procedures and procedures
 Number of joins: 3
 Performance:
-Execution time: 309ms
-Estimated rows scanned:39914 rows
+Execution time: 268.30ms
+Sorted rows: 36686 rows
+Rows Examined:137038 rows
 Bottleneck Identified:
 
 Why is this slow?
@@ -79,26 +79,27 @@ SQL QUERY:
 
 EXPLAIN ANALYZE
 SELECT
+    DATE_FORMAT(e.encounter_date, '%Y-%m') AS encounter_month,
     s.specialty_name,
-    COUNT(DISTINCT e1.encounter_id) AS readmissions
-FROM encounters e1
-JOIN encounters e2
-    ON e1.patient_id = e2.patient_id
-   AND e2.encounter_date > e1.discharge_date
-   AND e2.encounter_date <= DATE_ADD(e1.discharge_date, INTERVAL 30 DAY)
-JOIN providers p ON e2.provider_id = p.provider_id
+    e.encounter_type,
+    COUNT(*) AS total_encounters,
+    COUNT(DISTINCT e.patient_id) AS unique_patients
+FROM encounters e
+JOIN providers p ON e.provider_id = p.provider_id
 JOIN specialties s ON p.specialty_id = s.specialty_id
-WHERE e1.encounter_type = 'Inpatient'
-GROUP BY s.specialty_name
-ORDER BY readmissions DESC;
-
+GROUP BY
+    DATE_FORMAT(e.encounter_date, '%Y-%m'),
+    s.specialty_name,
+    e.encounter_type
+ORDER BY encounter_month, specialty_name;
 
 SCHEMA ANALYSIS:
 Tables joined: encounters(twice, self join), providers and specialties.
 Number of joins: 3
 Performance:
-Execution time: 51.1ms
-Estimated rows scanned: 133 rows
+Execution time: 29.83ms
+Sorted rows: 89
+Rows examined: 13762 rows
 Bottleneck Identified:
 
 Why is this slow?
@@ -116,27 +117,26 @@ Ans: The root cause is the need to perform a self-join on a transactional table 
 QUESTION 4: Revenue by Specialty and Month
 SQL QUERY:
 
+EXPLAIN ANALYZE
 SELECT
-    DATE_FORMAT(b.claim_date, '%Y-%m') AS claim_month,
-    s.specialty_name,
-    SUM(b.allowed_amount) AS total_revenue
-FROM billing b
-JOIN encounters e ON b.encounter_id = e.encounter_id
-JOIN providers p ON e.provider_id = p.provider_id
-JOIN specialties s ON p.specialty_id = s.specialty_id
-GROUP BY
-    DATE_FORMAT(b.claim_date, '%Y-%m'),
-    s.specialty_name
-ORDER BY total_revenue DESC;
+    d.icd10_code,
+    pr.cpt_code,
+    COUNT(*) AS encounter_count
+FROM encounter_diagnoses ed
+JOIN diagnoses d ON ed.diagnosis_id = d.diagnosis_id
+JOIN encounter_procedures ep ON ed.encounter_id = ep.encounter_id
+JOIN procedures pr ON ep.procedure_id = pr.procedure_id
+GROUP BY d.icd10_code, pr.cpt_code
+ORDER BY encounter_count DESC;
 
 SCHEMA ANALYSIS:
 Tables joined: billing, encounters, providers and specialties
 Number of joins: 3
 Performance:
-Execution time: 85.5ms
-Estimated rows scanned: 9996 rows
+Execution time: 52.47ms
+Sorted rows: 500
+Rows Examined: 40500
 Bottleneck Identified:
-
 Why is this slow?
 Ans: Because there is a multiple table join before performing aggregation. After the joins, MySQL calculates total revenue and groups the data by month and specialty, which requires additional processing and sorting. 
 

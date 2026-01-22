@@ -143,10 +143,9 @@ Impact on Query Performance:
 | Q4    | 2            | 0           | 1.9x faster |
 
 Trade-off:
-- Slightly increased storage (estimated 5-10% increase in fact table size)
+- Slightly increased storage 
 - ETL must populate these denormalized columns during load
-- If specialty/encounter_type changes, historical facts retain old values (acceptable for analytics)
-
+- If specialty/encounter_type changes, historical facts retain old values 
 
 
 

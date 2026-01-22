@@ -14,11 +14,11 @@ CREATE TABLE dim_date (
 
 
 -- ======================
--- Patient Dimension
+-- Patient Dimension (SCD Type 2)
 -- ======================
 CREATE TABLE dim_patient (
   patient_key INT AUTO_INCREMENT PRIMARY KEY,
-  patient_id INT NOT NULL UNIQUE,
+  patient_id INT NOT NULL,                      -- Natural key (not unique - multiple versions)
   first_name VARCHAR(100),
   last_name VARCHAR(100),
   gender CHAR(1),
@@ -26,7 +26,15 @@ CREATE TABLE dim_patient (
   age INT,
   age_group VARCHAR(20),
   mrn VARCHAR(20),
-  INDEX idx_patient_id (patient_id)
+  
+  -- SCD Type 2 Columns (for tracking historical changes)
+  effective_start_date DATE NOT NULL,           -- When this version became active
+  effective_end_date DATE DEFAULT NULL,         -- When this version expired (NULL = current)
+  is_current BOOLEAN DEFAULT TRUE,              -- Quick filter for current version
+  
+  INDEX idx_patient_id (patient_id),
+  INDEX idx_is_current (is_current),
+  INDEX idx_patient_current (patient_id, is_current)  -- Composite for lookups
 );
 
 -- ======================
@@ -54,11 +62,11 @@ CREATE TABLE dim_department (
 
 
 -- ======================
--- Provider Dimension
+-- Provider Dimension (SCD Type 2)
 -- ======================
 CREATE TABLE dim_provider (
   provider_key INT AUTO_INCREMENT PRIMARY KEY,
-  provider_id INT,
+  provider_id INT NOT NULL,                     -- Natural key (not unique - multiple versions)
   first_name VARCHAR(100),
   last_name VARCHAR(100),
   credential VARCHAR(20),
@@ -67,8 +75,16 @@ CREATE TABLE dim_provider (
   specialty_code VARCHAR(10),
   department_id INT,
   department_name VARCHAR(100),
+  
+  -- SCD Type 2 Columns (for tracking historical changes)
+  effective_start_date DATE NOT NULL,           -- When this version became active
+  effective_end_date DATE DEFAULT NULL,         -- When this version expired (NULL = current)
+  is_current BOOLEAN DEFAULT TRUE,              -- Quick filter for current version
+  
   INDEX idx_provider_id (provider_id),
-  INDEX idx_specialty_name (specialty_name)
+  INDEX idx_specialty_name (specialty_name),
+  INDEX idx_is_current (is_current),
+  INDEX idx_provider_current (provider_id, is_current)  -- Composite for lookups
 );
 
 -- =========================
@@ -176,10 +192,10 @@ CREATE TABLE fact_encounters (
     INDEX idx_is_inpatient (is_inpatient)                         -- Q3 WHERE filter
 );
 
+
 -- ======================
 -- Bridge Tables
 -- ======================
-
 
 CREATE TABLE bridge_encounter_diagnoses (
     bridge_diagnosis_key INT PRIMARY KEY AUTO_INCREMENT,

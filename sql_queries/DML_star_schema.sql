@@ -1,91 +1,32 @@
--- ================= ===============
--- Populate patient into dim_patient
--- ================= ===============
-INSERT INTO dim_patient (
-    patient_id,
-    first_name,
-    last_name,
-    gender,
-    date_of_birth,
-    age,
-    age_group,
-    mrn
-)
-SELECT
-    p.patient_id,
-    p.first_name,
-    p.last_name,
-    p.gender,
-    p.date_of_birth,
-    TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) AS age,
-    CASE
-        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) < 18 THEN '0-17'
-        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) BETWEEN 18 AND 35 THEN '18-35'
-        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) BETWEEN 36 AND 55 THEN '36-55'
-        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) BETWEEN 56 AND 70 THEN '56-70'
-        ELSE '70+'
-    END AS age_group,
-    p.mrn
-FROM patients p;
+-- =====================================================================
+-- STAR SCHEMA ETL LOAD SCRIPT
+-- =====================================================================
+-- This script loads data from OLTP tables into the Star Schema
+-- IMPORTANT: Tables must be loaded in DEPENDENCY ORDER (parents before children)
+-- =====================================================================
+
+-- =====================================================================
+-- LOAD ORDER (Handles Dependencies)
+-- =====================================================================
+-- STEP 1: Load dimensions with NO dependencies first
+--         dim_date, dim_specialty, dim_department, dim_encounter_type,
+--         dim_diagnosis, dim_procedure, dim_patient
+-- STEP 2: Load dimensions that DEPEND on other dimensions
+--         dim_provider (depends on dim_specialty, dim_department)
+-- STEP 3: Load fact table (depends on ALL dimensions)
+--         fact_encounters
+-- STEP 4: Load bridge tables (depend on fact table and dimensions)
+--         bridge_encounter_diagnoses, bridge_encounter_procedures
+-- =====================================================================
 
 
--- ================= ===================
--- populate provider into dim_provider
--- ================= ====================
-INSERT INTO dim_provider (provider_id, first_name, last_name, credential,
-                          specialty_id, specialty_name, specialty_code,
-                          department_id, department_name)
-SELECT 
-    p.provider_id,
-    p.first_name,
-    p.last_name,
-    p.credential,
-    p.specialty_id,
-    s.specialty_name,  -- DENORMALIZED
-    s.specialty_code,  -- DENORMALIZED
-    p.department_id,
-    d.department_name  -- DENORMALIZED
-FROM providers p
-JOIN specialties s ON p.specialty_id = s.specialty_id
-JOIN departments d ON p.department_id = d.department_id;
+-- =====================================================================
+-- STEP 1A: LOAD INDEPENDENT DIMENSIONS (No Foreign Key Dependencies)
+-- =====================================================================
 
-
--- Load dim_diagnosis
-INSERT INTO dim_diagnosis (diagnosis_id, icd10_code, icd10_description)
-SELECT diagnosis_id, icd10_code, icd10_description
-FROM diagnoses;
-
-
--- Load dim_procedure
-INSERT INTO dim_procedure (procedure_id, cpt_code, cpt_description)
-SELECT procedure_id, cpt_code, cpt_description
-FROM procedures;
-
-
--- ================= ===========================
--- Handle Update in patient table in dim_patient
--- ================= ============================
-UPDATE dim_patient dp
-JOIN patients p ON dp.patient_id = p.patient_id
-SET
-    dp.first_name = p.first_name,
-    dp.last_name = p.last_name,
-    dp.gender = p.gender,
-    dp.date_of_birth = p.date_of_birth,
-    dp.age = TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()),
-    dp.age_group =
-        CASE
-        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) < 18 THEN '0-17'
-        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) BETWEEN 18 AND 35 THEN '18-35'
-        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) BETWEEN 36 AND 55 THEN '36-55'
-        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) BETWEEN 56 AND 70 THEN '56-70'
-        ELSE '70+'
-        END;
- 
--- ================= 
--- 	Dates Generation 
--- ================= 
-
+-- ===============================
+-- dim_date (One-time load, no dependencies)
+-- ===============================
 SET @@cte_max_recursion_depth = 5000;
 INSERT INTO dim_date (
     date_key, calendar_date, year, month, month_name, quarter, day, day_of_week
@@ -109,27 +50,130 @@ SELECT
 FROM date_range;
 
 
--- ================= ===================
--- populate specialty into dim_specialty
--- ================= ====================
+-- ===============================
+-- dim_specialty (No dependencies - simple lookup table)
+-- ===============================
 INSERT INTO dim_specialty (specialty_id, specialty_name, specialty_code)
 SELECT specialty_id, specialty_name, specialty_code 
 FROM specialties;
 
 
-
--- ================= ===================
--- populate department into dim_department
--- ================= ====================
+-- ===============================
+-- dim_department (No dependencies - simple lookup table)
+-- ===============================
 INSERT INTO dim_department (department_id, department_name, floor, capacity)
 SELECT department_id, department_name, floor, capacity
-from departments;
+FROM departments;
 
--- =======================
--- Fact Table 
--- =======================
 
-select * from fact_encounters;
+-- ===============================
+-- dim_encounter_type (Static reference data - no dependencies)
+-- ===============================
+INSERT INTO dim_encounter_type (encounter_type_name)
+SELECT DISTINCT encounter_type 
+FROM encounters;
+
+
+-- ===============================
+-- dim_diagnosis (No dependencies - lookup table)
+-- ===============================
+INSERT INTO dim_diagnosis (diagnosis_id, icd10_code, icd10_description)
+SELECT diagnosis_id, icd10_code, icd10_description
+FROM diagnoses;
+
+
+-- ===============================
+-- dim_procedure (No dependencies - lookup table)
+-- ===============================
+INSERT INTO dim_procedure (procedure_id, cpt_code, cpt_description)
+SELECT procedure_id, cpt_code, cpt_description
+FROM procedures;
+
+
+-- ===============================
+-- dim_patient (SCD Type 2 - No dependencies)
+-- ===============================
+INSERT INTO dim_patient (
+    patient_id,
+    first_name,
+    last_name,
+    gender,
+    date_of_birth,
+    age,
+    age_group,
+    mrn,
+    effective_start_date,
+    effective_end_date,
+    is_current
+)
+SELECT
+    p.patient_id,
+    p.first_name,
+    p.last_name,
+    p.gender,
+    p.date_of_birth,
+    TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) AS age,
+    CASE
+        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) < 18 THEN '0-17'
+        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) BETWEEN 18 AND 35 THEN '18-35'
+        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) BETWEEN 36 AND 55 THEN '36-55'
+        WHEN TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) BETWEEN 56 AND 70 THEN '56-70'
+        ELSE '70+'
+    END AS age_group,
+    p.mrn,
+    CURDATE() AS effective_start_date,  -- SCD Type 2
+    NULL AS effective_end_date,          -- NULL = current version
+    TRUE AS is_current                   -- Current version flag
+FROM patients p;
+
+
+-- =====================================================================
+-- STEP 1B: LOAD DIMENSIONS WITH DEPENDENCIES
+-- =====================================================================
+
+-- ===============================
+-- dim_provider (SCD Type 2)
+-- DEPENDS ON: dim_specialty, dim_department (must be loaded first!)
+-- ===============================
+-- Check: dim_specialty and dim_department must have data before this runs
+INSERT INTO dim_provider (
+    provider_id, 
+    first_name, 
+    last_name, 
+    credential,
+    specialty_id, 
+    specialty_name, 
+    specialty_code,
+    department_id, 
+    department_name,
+    effective_start_date,
+    effective_end_date,
+    is_current
+)
+SELECT 
+    p.provider_id,
+    p.first_name,
+    p.last_name,
+    p.credential,
+    p.specialty_id,
+    s.specialty_name,   -- DENORMALIZED from specialties
+    s.specialty_code,   -- DENORMALIZED from specialties
+    p.department_id,
+    d.department_name,  -- DENORMALIZED from departments
+    CURDATE() AS effective_start_date,  -- SCD Type 2
+    NULL AS effective_end_date,          -- NULL = current version
+    TRUE AS is_current                   -- Current version flag
+FROM providers p
+-- DEPENDENCY: Join to OLTP tables (not dim tables yet)
+JOIN specialties s ON p.specialty_id = s.specialty_id
+JOIN departments d ON p.department_id = d.department_id;
+
+
+-- =====================================================================
+-- STEP 2: LOAD FACT TABLE
+-- =====================================================================
+
+
 INSERT INTO fact_encounters (
     encounter_id,
     encounter_date_key,
@@ -142,6 +186,15 @@ INSERT INTO fact_encounters (
     encounter_date,
     discharge_date,
     length_of_stay_days,
+    
+    -- Denormalized attributes 
+    specialty_name,
+    encounter_type_name,
+    encounter_year,
+    encounter_month,
+    encounter_month_name,
+    
+    -- Pre-aggregated metrics
     diagnosis_count,
     procedure_count,
     total_claim_amount,
@@ -153,7 +206,8 @@ INSERT INTO fact_encounters (
 )
 SELECT 
     e.encounter_id,
-    -- Date keys
+    
+    -- Date keys (lookup from dim_date)
     DATE_FORMAT(e.encounter_date, '%Y%m%d') AS encounter_date_key,
     CASE 
         WHEN e.discharge_date IS NOT NULL 
@@ -161,12 +215,13 @@ SELECT
         ELSE NULL 
     END AS discharge_date_key,
     
-    -- Dimension keys (lookup surrogate keys)
-    dp.patient_key,
-    dprov.provider_key,
-    ds.specialty_key,
-    dd.department_key,
-    det.encounter_type_key,
+    -- DIMENSION KEY LOOKUPS 
+    -- Each lookup finds the surrogate key from the dimension table
+    dp.patient_key,           -- Lookup from dim_patient
+    dprov.provider_key,       -- Lookup from dim_provider
+    ds.specialty_key,         -- Lookup from dim_specialty
+    dd.department_key,        -- Lookup from dim_department
+    det.encounter_type_key,   -- Lookup from dim_encounter_type
     
     -- Encounter details
     e.encounter_date,
@@ -177,7 +232,14 @@ SELECT
         ELSE NULL 
     END AS length_of_stay_days,
     
-    -- PRE-AGGREGATED: Diagnosis count
+    -- DENORMALIZED: Copy from dimensions to avoid JOINs
+    ds.specialty_name,
+    e.encounter_type,
+    YEAR(e.encounter_date) AS encounter_year,
+    MONTH(e.encounter_date) AS encounter_month,
+    MONTHNAME(e.encounter_date) AS encounter_month_name,
+    
+    -- PRE-AGGREGATED: Diagnosis count (calculated at ETL time)
     (SELECT COUNT(*) 
      FROM encounter_diagnoses ed 
      WHERE ed.encounter_id = e.encounter_id) AS diagnosis_count,
@@ -235,9 +297,9 @@ SELECT
     END AS days_since_last_discharge
     
 FROM encounters e
--- Join to dimensions to get surrogate keys
-JOIN dim_patient dp ON e.patient_id = dp.patient_id
-JOIN dim_provider dprov ON e.provider_id = dprov.provider_id
+-- JOIN to dimensions to get surrogate keys
+JOIN dim_patient dp ON e.patient_id = dp.patient_id AND dp.is_current = TRUE
+JOIN dim_provider dprov ON e.provider_id = dprov.provider_id AND dprov.is_current = TRUE
 JOIN dim_specialty ds ON dprov.specialty_id = ds.specialty_id
 JOIN dim_department dd ON e.department_id = dd.department_id
 JOIN dim_encounter_type det ON e.encounter_type = det.encounter_type_name;
@@ -247,20 +309,19 @@ JOIN dim_encounter_type det ON e.encounter_type = det.encounter_type_name;
 -- STEP 3: LOAD BRIDGE TABLES
 -- =====================================================================
 
--- ==============================
+-- ===============================
 -- Bridge: Encounter to Diagnoses
--- ==============================
+-- ===============================
 INSERT INTO bridge_encounter_diagnoses (
     encounter_key, diagnosis_key, diagnosis_sequence
 )
 SELECT DISTINCT
-    f.encounter_key,
-    dd.diagnosis_key,
+    f.encounter_key,       -- From fact_encounters (must exist!)
+    dd.diagnosis_key,      -- From dim_diagnosis (must exist!)
     ed.diagnosis_sequence
 FROM encounter_diagnoses ed
 JOIN fact_encounters f ON ed.encounter_id = f.encounter_id
 JOIN dim_diagnosis dd ON ed.diagnosis_id = dd.diagnosis_id;
-
 
 
 -- ===============================
@@ -268,19 +329,10 @@ JOIN dim_diagnosis dd ON ed.diagnosis_id = dd.diagnosis_id;
 -- ===============================
 INSERT INTO bridge_encounter_procedures (encounter_key, procedure_key, procedure_date)
 SELECT 
-    f.encounter_key,
-    dp.procedure_key,
+    f.encounter_key,       -- From fact_encounters (must exist!)
+    dp.procedure_key,      -- From dim_procedure (must exist!)
     ep.procedure_date
 FROM encounter_procedures ep
 JOIN fact_encounters f ON ep.encounter_id = f.encounter_id
 JOIN dim_procedure dp ON ep.procedure_id = dp.procedure_id;
-
-
--- SET FOREIGN_KEY_CHECKS = 0;
--- SET FOREIGN_KEY_CHECKS = 1;
-
-
-
-
-
 

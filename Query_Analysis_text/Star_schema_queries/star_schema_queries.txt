@@ -19,13 +19,12 @@ GROUP BY
     f.encounter_type_name
 ORDER BY f.encounter_year, f.encounter_month, f.specialty_name, f.encounter_type_name;
 
-
 SCHEMA ANALYSIS:
 Tables joined: fact_encounters only (no JOINs needed)
 Number of joins: 0
 
-Execution Time Estimate: 35ms vs 51.5ms (OLTP)
-Improvement factor: 1.5x faster
+Execution Time Estimate: 41.86ms vs 81.6ms (OLTP)
+Improvement factor: 1.95x faster
 
 Explanation:
 The optimized star schema query requires ZERO JOINs because all needed attributes (specialty_name, encounter_type_name, year, month, month_name) are denormalized directly into the fact table. The OLTP requires 2 JOINs (providers → specialties). This eliminates all table lookups and reduces query complexity significantly.
@@ -55,13 +54,12 @@ GROUP BY
 ORDER BY encounter_count DESC
 LIMIT 20;
 
-
 SCHEMA ANALYSIS:
 Tables joined: bridge_encounter_diagnoses, dim_diagnosis, bridge_encounter_procedures, dim_procedure
 Number of joins: 3
 
-Execution Time Estimate: 226ms vs 309ms (OLTP)
-Improvement factor: 1.4x faster
+Execution Time Estimate: 250ms vs 268.30ms (OLTP)
+Improvement factor: 1.07x faster
 
 Explanation:
 This query still requires JOINs because diagnoses and procedures have a many-to-many relationship with encounters (bridge tables are necessary to avoid row explosion). However, the star schema uses pre-keyed surrogate keys in bridge tables, making lookups faster than the OLTP's encounter_diagnoses → diagnoses → encounter_procedures → procedures chain.
@@ -89,8 +87,8 @@ SCHEMA ANALYSIS:
 Tables joined: fact_encounters only (no JOINs needed)
 Number of joins: 0
 
-Execution Time Estimate: 14.9ms vs 51.1ms (OLTP)
-Improvement factor: 3.4x faster
+Execution Time Estimate: 15.0ms vs 29.83ms (OLTP)
+Improvement factor: 2.0x faster
 
 Explanation:
 The optimized star schema query requires ZERO JOINs because:
@@ -127,8 +125,8 @@ SCHEMA ANALYSIS:
 Tables joined: fact_encounters only (no JOINs needed)
 Number of joins: 0
 
-Execution Time Estimate: 45ms vs 85.5ms (OLTP)
-Improvement factor: 1.9x faster
+Execution Time Estimate: 31ms vs 52.47ms(OLTP)
+Improvement factor: 1.7x faster
 
 Explanation:
 The optimized star schema query requires ZERO JOINs because specialty_name, year, month, and month_name are denormalized into the fact table. The OLTP requires 3 JOINs (billing → encounters → providers → specialties) plus DATE_FORMAT calculations. Pre-aggregated total_allowed_amount eliminates the billing table join entirely.
@@ -140,10 +138,10 @@ SUMMARY: JOIN Comparison
 
 | Query | OLTP JOINs | Star Schema JOINs | Improvement |
 |-------|------------|-------------------|-------------|
-| Q1    | 2          | 0                 | 1.5x faster |
-| Q2    | 3          | 3                 | 1.4x faster |
-| Q3    | 3          | 0                 | 3.4x faster |
-| Q4    | 3          | 0                 | 1.9x faster |
+| Q1    | 2          | 0                 | 1.95x faster |
+| Q2    | 3          | 3                 | 1.07x faster |
+| Q3    | 3          | 0                 | 2.0x faster |
+| Q4    | 3          | 0                 | 1.7x faster |
 
 Key Design Decision:
 By denormalizing specialty_name, encounter_type_name, and date attributes directly into the fact table, we eliminate JOINs for the most common analytical queries (Q1, Q3, Q4). This follows the star schema best practice of trading storage redundancy for query performance.

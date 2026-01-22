@@ -109,7 +109,6 @@ CREATE TABLE billing (
 
 
 
-
-
+select * from encounter_procedures;
 
 
