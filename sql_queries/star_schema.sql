@@ -69,20 +69,13 @@ CREATE TABLE dim_provider (
   provider_id INT NOT NULL,                     -- Natural key (not unique - multiple versions)
   first_name VARCHAR(100),
   last_name VARCHAR(100),
-  credential VARCHAR(20),
-  specialty_id INT,
-  specialty_name VARCHAR(100),
-  specialty_code VARCHAR(10),
-  department_id INT,
-  department_name VARCHAR(100),
-  
+  credential VARCHAR(20)
   -- SCD Type 2 Columns (for tracking historical changes)
   effective_start_date DATE NOT NULL,           -- When this version became active
   effective_end_date DATE DEFAULT NULL,         -- When this version expired (NULL = current)
   is_current BOOLEAN DEFAULT TRUE,              -- Quick filter for current version
   
   INDEX idx_provider_id (provider_id),
-  INDEX idx_specialty_name (specialty_name),
   INDEX idx_is_current (is_current),
   INDEX idx_provider_current (provider_id, is_current)  -- Composite for lookups
 );
@@ -126,8 +119,8 @@ CREATE TABLE dim_encounter_type (
 -- Fact Table
 -- ======================
 CREATE TABLE fact_encounters (
-    encounter_key INT PRIMARY KEY AUTO_INCREMENT,
-    encounter_id INT NOT NULL UNIQUE,
+    encounter_key INT PRIMARY KEY AUTO_INCREMENT,        -- surrogate primary key for warehouse joins
+    encounter_id INT NOT NULL UNIQUE,                    -- Business identifier from source (OLTP)
     
     -- Foreign Keys to Dimensions
     encounter_date_key INT NOT NULL,
@@ -139,8 +132,8 @@ CREATE TABLE fact_encounters (
     encounter_type_key INT NOT NULL,
     
     -- Encounter Details
-    encounter_date DATETIME NOT NULL,
-    discharge_date DATETIME,
+    encounter_date DATETIME NOT NULL,                      -- date encounter started
+    discharge_date DATETIME,                               -- date encounter ended 
     length_of_stay_days INT,
     
     -- Denormalized Attributes (to eliminate JOINs in analytical queries)
@@ -151,8 +144,8 @@ CREATE TABLE fact_encounters (
     encounter_month_name VARCHAR(20),     -- From dim_date
     
     -- Pre-aggregated Metrics (to avoid expensive JOINs)
-    diagnosis_count INT DEFAULT 0,
-    procedure_count INT DEFAULT 0,
+    diagnosis_count INT DEFAULT 0,             -- number of diagnoses per encounter
+    procedure_count INT DEFAULT 0,             -- number of procedures per encounter
     
     -- Financial Metrics (pre-aggregated from billing)
     total_claim_amount DECIMAL(12, 2) DEFAULT 0,
@@ -160,10 +153,10 @@ CREATE TABLE fact_encounters (
     billing_count INT DEFAULT 0,
     
     -- Readmission Analysis Helper
-    is_inpatient BOOLEAN,
-    previous_discharge_date DATETIME,
-    is_readmission BOOLEAN DEFAULT FALSE,
-    days_since_last_discharge INT,
+    is_inpatient BOOLEAN,                        -- Flag inpatient encounters
+    previous_discharge_date DATETIME,            -- prior discharge date
+    is_readmission BOOLEAN DEFAULT FALSE,        -- Readmission indicator
+    days_since_last_discharge INT,               -- Gap between encounters
     
     -- Foreign Key Constraints
     FOREIGN KEY (encounter_date_key) REFERENCES dim_date(date_key),
@@ -174,13 +167,14 @@ CREATE TABLE fact_encounters (
     FOREIGN KEY (department_key) REFERENCES dim_department(department_key),
     FOREIGN KEY (encounter_type_key) REFERENCES dim_encounter_type(encounter_type_key),
     
-    -- Indexes for Performance
+    -- Indexes for Performance (lookup)
     INDEX idx_encounter_id (encounter_id),
     INDEX idx_encounter_date_key (encounter_date_key),
     INDEX idx_patient_key (patient_key),
     INDEX idx_provider_key (provider_key),
     INDEX idx_specialty_key (specialty_key),
     INDEX idx_encounter_type_key (encounter_type_key),
+    -- Readmission and performance-driven indexes
     INDEX idx_readmission (is_readmission, specialty_key),
     INDEX idx_date_specialty (encounter_date_key, specialty_key),
     INDEX idx_patient_encounter_date (patient_key, encounter_date),

@@ -141,11 +141,6 @@ INSERT INTO dim_provider (
     first_name, 
     last_name, 
     credential,
-    specialty_id, 
-    specialty_name, 
-    specialty_code,
-    department_id, 
-    department_name,
     effective_start_date,
     effective_end_date,
     is_current
@@ -156,17 +151,11 @@ SELECT
     p.last_name,
     p.credential,
     p.specialty_id,
-    s.specialty_name,   -- DENORMALIZED from specialties
-    s.specialty_code,   -- DENORMALIZED from specialties
-    p.department_id,
-    d.department_name,  -- DENORMALIZED from departments
     CURDATE() AS effective_start_date,  -- SCD Type 2
     NULL AS effective_end_date,          -- NULL = current version
     TRUE AS is_current                   -- Current version flag
 FROM providers p
--- DEPENDENCY: Join to OLTP tables (not dim tables yet)
-JOIN specialties s ON p.specialty_id = s.specialty_id
-JOIN departments d ON p.department_id = d.department_id;
+
 
 
 -- =====================================================================
@@ -176,13 +165,16 @@ JOIN departments d ON p.department_id = d.department_id;
 
 INSERT INTO fact_encounters (
     encounter_id,
-    encounter_date_key,
+    -- Date dimension surrogate keys
+    encounter_date_key,    
     discharge_date_key,
+    -- Dimension foreign keys
     patient_key,
     provider_key,
     specialty_key,
     department_key,
     encounter_type_key,
+    -- Exact date and time values from source (OLTP)
     encounter_date,
     discharge_date,
     length_of_stay_days,
@@ -200,6 +192,7 @@ INSERT INTO fact_encounters (
     total_claim_amount,
     total_allowed_amount,
     billing_count,
+    -- Readmission analysis fields
     is_inpatient,
     is_readmission,
     days_since_last_discharge
